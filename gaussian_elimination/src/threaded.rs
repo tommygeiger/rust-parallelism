@@ -1,4 +1,5 @@
 use rand::Rng;
+use std::thread;
 
 pub fn init(size:usize) -> Vec<Vec<f64>>{
     //init matrix

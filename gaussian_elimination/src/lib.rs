@@ -1,6 +1,12 @@
 use rand::Rng;
+//use crossbeam;
+
 use crossbeam::thread;
-use std::thread;
+use crossbeam::crossbeam_channel::bounded;
+
+//use std::thread;
+//use thread_id;
+//use std::sync::mpsc;
 //use std::sync::Arc;
 
 pub fn init(size:usize) -> Vec<Vec<f64>>{
@@ -22,7 +28,7 @@ pub fn init(size:usize) -> Vec<Vec<f64>>{
     system
 }
 
-pub fn run(system: Vec<Vec<f64>>, size: usize, num_threads: u32) -> Vec<f64>{
+pub fn run(system: Vec<Vec<f64>>, size: usize, num_threads: usize) -> Vec<f64>{
     //solve
     eliminate(system,size,num_threads).unwrap()
 
@@ -59,16 +65,19 @@ pub fn print_matrix(system: &Vec<Vec<f64>>, size: usize){
         }
         print!("\n");
     }
-    print!("===========\n");
+        print!("===========\n");
 }
 
-pub fn eliminate(mut system: Vec<Vec<f64>>, size: usize, num_threads: u32) -> Option<Vec<f64>> {
+pub fn eliminate(mut system: Vec<Vec<f64>>, size: usize, num_threads: usize) -> Option<Vec<f64>> {
     // produce the row reduced echelon form
     //
     // for every row...
     let mut pivotrow: usize;
     let mut pivotval;
     let mut x:Vec<f64> = vec![0.0;size];
+
+    let (tx_data, rx_data) = bounded(size);
+    let (tx_iter, rx_iter) = bounded(num_threads);
     for i in 0..size {
         //print_matrix(&system,size);
         
@@ -91,25 +100,46 @@ pub fn eliminate(mut system: Vec<Vec<f64>>, size: usize, num_threads: u32) -> Op
             }
         }
 
-        // for every column in that row...
-        println!("           {}",i);
         for t in 0..num_threads{
-            thread::scope(|s| {
+            tx_iter.send(t).unwrap();
+        }
+
+        // for every column in that row...
+        //println!("           {}",i);
+        thread::scope(|s| {
+            for _ in 0..num_threads {
                 s.spawn(|_| {
-                    println!("Hello from thread {}",t);
+                    let tx_data1 = tx_data.clone();
+                    let rx_iter1 = rx_iter.clone();
+
+                    let my_id: usize = rx_iter1.recv().unwrap();
+                    //println!("{}: Received id", my_id);
+
                     for j in i+1..size {
-                        if j as u32 % num_threads == t{
+                        //println!("{}: j = {}",my_id,j);
+                        if j % num_threads == my_id{
+                            //println!("{}: Processing line {}",my_id,j);
+                            let mut mine = system[j].clone();
                             let factor = system[j][i];
                             // reduce every element under that element to 0
-                            system[j][i]= 0f64;
+                            mine[i]= 0f64;
                             for k in i+1..size+1 {
-                                system[j][k] -= factor * system[i][k];
+                                mine[k] -= factor * system[i][k];
                             }
+
+                            //println!("{}: Sending line {}",my_id,j);
+                            tx_data1.send((mine,j)).unwrap();
+                            //println!("{}: Sent line {}",my_id,j);
                         }
                     }
-
                 });
-            }).unwrap();
+            }
+        }).unwrap();
+
+        for _ in i+1..size{
+            let (vec,index) = rx_data.recv().unwrap();
+            //println!("Got {}: {:?}",index,vec);
+            system[index]=vec;
         }
     }
 

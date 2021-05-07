@@ -6,7 +6,7 @@ fn main(){
     let args: Vec<String> = env::args().collect();
 
     let size :usize = args[1].parse().unwrap();
-    let num_threads :u32 = args[2].parse().unwrap();
+    let num_threads :usize = args[2].parse().unwrap();
 
     let start_time = time::Instant::now(); 
 

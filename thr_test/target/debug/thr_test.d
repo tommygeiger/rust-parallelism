@@ -1,0 +1,1 @@
+/home/hoover/u10/breber/458/sem_proj/rust-parallelism/thr_test/target/debug/thr_test: /home/hoover/u10/breber/458/sem_proj/rust-parallelism/thr_test/src/lib.rs /home/hoover/u10/breber/458/sem_proj/rust-parallelism/thr_test/src/main.rs
