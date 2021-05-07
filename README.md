@@ -1,2 +1,2 @@
 # rust-parallelism
-hello from Ben
+An analysis of parallelism techniques in Go, Rust and C.
