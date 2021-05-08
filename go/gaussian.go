@@ -1,94 +1,156 @@
 package main
  
 import (
-    "errors"
-    "fmt"
-    "log"
-    "math"
+		"fmt"
+		"log"
+		"math"
+		"math/rand"
+		"sync"
+		"flag"
+		"time"
 )
- 
-type testCase struct {
-    a [][]float64
-    b []float64
-    x []float64
+
+type Matrix struct {
+		a [][]float64
+		b []float64
+		x []float64
 }
- 
-var tc = testCase{
-    a: [][]float64{
-        {1.00, 0.00, 0.00, 0.00, 0.00, 0.00},
-        {1.00, 0.63, 0.39, 0.25, 0.16, 0.10},
-        {1.00, 1.26, 1.58, 1.98, 2.49, 3.13},
-        {1.00, 1.88, 3.55, 6.70, 12.62, 23.80},
-        {1.00, 2.51, 6.32, 15.88, 39.90, 100.28},
-        {1.00, 3.14, 9.87, 31.01, 97.41, 306.02}},
-    b: []float64{-0.01, 0.61, 0.91, 0.99, 0.60, 0.02},
-    x: []float64{-0.01, 1.602790394502114, -1.6132030599055613,
-        1.2454941213714368, -0.4909897195846576, 0.065760696175232},
-}
- 
-// result from above test case turns out to be correct to this tolerance.
-const ε = 1e-14
- 
+
+var m int // matrix dimensions
+var matrix Matrix // matrix
+var aug [][]float64 // augmented matrix
+var x []float64 // solution matrix
+var g int // number of worker threads
+var wg sync.WaitGroup // waitgroup
+const ε = 1e-6 // tolerance
+
+
 func main() {
-    x, err := GaussPartial(tc.a, tc.b)
-    if err != nil {
-        log.Fatal(err)
-    }
-    fmt.Println(x)
-    for i, xi := range x {
-        if math.Abs(tc.x[i]-xi) > ε {
-            log.Println("out of tolerance")
-            log.Fatal("expected", tc.x)
-        }
-    }
+
+		// Get flags
+		gPtr := flag.Int("g", 1, "number of workers")
+		mPtr := flag.Int("m", 128, "matrix dimensions")
+		flag.Parse()
+		g = *gPtr
+		m = *mPtr
+
+		initializeMatrix()
+		
+		// Init augmented matrix and solution matrix
+		aug = make([][]float64, m)
+		for i, ai := range matrix.a {
+			row := make([]float64, m+1)
+			copy(row, ai)
+			row[m] = matrix.b[i]
+			aug[i] = row
+		}
+		x = make([]float64, m)
+
+		
+		start := time.Now()
+		// Begin gaussian elimination
+		for k := range aug {
+
+			// Partial pivoting
+			doPivot(k)
+
+			// Spawn workers for elimination
+			for id := 0; id < g; id++ {
+				wg.Add(1)
+				go doEliminate(k, id)
+			}
+
+			// Barrier
+			wg.Wait()
+		}
+		end := time.Now()
+		elapsed := end.Sub(start)
+
+
+		// Back substitution
+		for i := m - 1; i >= 0; i-- {
+				x[i] = aug[i][m]
+				for j := i + 1; j < m; j++ {
+						x[i] -= aug[i][j] * x[j]
+				}
+				x[i] /= aug[i][i]
+		}
+
+		// Verify solution
+		// fmt.Println(x)
+		fmt.Printf("%v,%v,%v\n",m,g,elapsed)
+		for i, xi := range x {
+				if math.Abs(matrix.x[i] - xi) > ε {
+						log.Println("out of tolerance")
+						log.Fatal("expected", matrix.x)
+				}
+		}
 }
- 
-func GaussPartial(a0 [][]float64, b0 []float64) ([]float64, error) {
-    m := len(b0)
-    a := make([][]float64, m)
-    for i, ai := range a0 {
-        row := make([]float64, m+1)
-        copy(row, ai)
-        row[m] = b0[i]
-        a[i] = row
-    }
-    for k := range a {
-        iMax := 0
-        max := -1.
-        for i := k; i < m; i++ {
-            row := a[i]
-            // compute scale factor s = max abs in row
-            s := -1.
-            for j := k; j < m; j++ {
-                x := math.Abs(row[j])
-                if x > s {
-                    s = x
-                }
-            }
-            // scale the abs used to pick the pivot.
-            if abs := math.Abs(row[k]) / s; abs > max {
-                iMax = i
-                max = abs
-            }
-        }
-        if a[iMax][k] == 0 {
-            return nil, errors.New("singular")
-        }
-        a[k], a[iMax] = a[iMax], a[k]
-        for i := k + 1; i < m; i++ {
-            for j := k + 1; j <= m; j++ {
-                a[i][j] -= a[k][j] * (a[i][k] / a[k][k])
-            }
-            a[i][k] = 0
-        }
-    }
-    x := make([]float64, m)
-    for i := m - 1; i >= 0; i-- {
-        x[i] = a[i][m]
-        for j := i + 1; j < m; j++ {
-            x[i] -= a[i][j] * x[j]
-        }
-        x[i] /= a[i][i]
-    }
-    return x, nil
+
+
+// Perform elimination step
+func doEliminate(k int, id int) {
+
+		// Elimination
+		for i := k + 1 + id; i < m; i += g {
+				for j := k + 1; j <= m; j++ {
+					aug[i][j] -= aug[k][j] * (aug[i][k] / aug[k][k])
+				}
+				aug[i][k] = 0
+		}
+
+		// Reach barrier
+		wg.Done()
+}
+
+
+// Perform partial pivoting
+func doPivot(k int) {
+	iMax := 0
+	max := -1.
+
+	for i := k; i < m; i++ {
+			row := aug[i]
+
+			// Compute scale factor s = max abs in row
+			s := -1.
+			for j := k; j < m; j++ {
+					rowAbs := math.Abs(row[j])
+					if rowAbs > s {
+							s = rowAbs
+					}
+			}
+
+			// Scale the abs used to pick the pivot
+			if abs := math.Abs(row[k]) / s; abs > max {
+					iMax = i
+					max = abs
+			}
+	}
+	
+	// Check for singular matrix
+	if aug[iMax][k] == 0 {
+			log.Fatal("singular")
+	}
+	
+	// Swap rows
+	aug[k], aug[iMax] = aug[iMax], aug[k]
+}
+
+
+// Initialize m x m matrix with easily verifiable values
+func initializeMatrix() {
+	
+	matrix.a = make([][]float64, m)
+	matrix.b = make([]float64, m)
+	matrix.x = make([]float64, m)
+
+	for i := range matrix.a {
+		matrix.a[i] = make([]float64, m) // augmented matrix
+		for j := 0; j < m; j++ {
+			matrix.a[i][j] = rand.Float64() * 10.
+			matrix.b[i] += matrix.a[i][j] * float64(j+1)
+		}
+		matrix.x[i] = float64(i+1) // initialize x to [1, 2, 3...]
+	}
 }
