@@ -21,8 +21,13 @@ var matrix Matrix // matrix
 var aug [][]float64 // augmented matrix
 var x []float64 // solution matrix
 var g int // number of worker threads
-var wg sync.WaitGroup // waitgroup
 const ε = 1e-6 // tolerance
+
+// Synchronization globals
+var channel chan int
+var wg sync.WaitGroup
+var mutex = sync.Mutex{}
+var c = sync.NewCond(&mutex)
 
 
 func main() {
@@ -36,7 +41,8 @@ func main() {
 
 		initializeMatrix()
 		
-		// Init augmented matrix and solution matrix
+		// Init solution matrix and augmented matrix
+		x = make([]float64, m)
 		aug = make([][]float64, m)
 		for i, ai := range matrix.a {
 			row := make([]float64, m+1)
@@ -44,28 +50,19 @@ func main() {
 			row[m] = matrix.b[i]
 			aug[i] = row
 		}
-		x = make([]float64, m)
 
-		
-		start := time.Now()
-		// Begin gaussian elimination
-		for k := range aug {
+		// Init buffered channel
+		channel = make(chan int, g)
 
-			// Partial pivoting
-			doPivot(k)
-
-			// Spawn workers for elimination
-			for id := 0; id < g; id++ {
-				wg.Add(1)
-				go doEliminate(k, id)
-			}
-
-			// Barrier
-			wg.Wait()
+		/*----*/ start := time.Now() /*----*/
+		// Spawn goroutines for elimination step
+		for id := 0; id < g; id++ {
+			wg.Add(1)
+			go doEliminate(id)
 		}
-		end := time.Now()
+		wg.Wait()
+		/*----*/ end := time.Now() /*----*/
 		elapsed := end.Sub(start)
-
 
 		// Back substitution
 		for i := m - 1; i >= 0; i-- {
@@ -77,30 +74,40 @@ func main() {
 		}
 
 		// Verify solution
-		// fmt.Println(x)
 		fmt.Printf("%v,%v,%v\n",m,g,elapsed)
 		for i, xi := range x {
 				if math.Abs(matrix.x[i] - xi) > ε {
-						log.Println("out of tolerance")
-						log.Fatal("expected", matrix.x)
+						fmt.Println("Calculated:", x)
+						fmt.Println("Expected:", matrix.x)
+						log.Fatal("Out of tolerance")
 				}
 		}
 }
 
 
 // Perform elimination step
-func doEliminate(k int, id int) {
+func doEliminate(id int) {
+	  defer wg.Done()
 
-		// Elimination
-		for i := k + 1 + id; i < m; i += g {
+		for k := range aug {
+
+			// Partial pivoting once
+			if id == 0 {
+				doPivot(k)
+			}
+
+			Barrier(id)
+
+			// Elimination step
+			for i := k + 1 + id; i < m; i += g {
 				for j := k + 1; j <= m; j++ {
 					aug[i][j] -= aug[k][j] * (aug[i][k] / aug[k][k])
 				}
 				aug[i][k] = 0
-		}
+			}
 
-		// Reach barrier
-		wg.Done()
+			Barrier(id)
+		}
 }
 
 
@@ -130,11 +137,34 @@ func doPivot(k int) {
 	
 	// Check for singular matrix
 	if aug[iMax][k] == 0 {
-			log.Fatal("singular")
+			log.Fatal("Singular")
 	}
 	
 	// Swap rows
 	aug[k], aug[iMax] = aug[iMax], aug[k]
+}
+
+
+// Sync all goroutines
+func Barrier(id int) {
+
+	// Master thread waits for all channels, then broadcasts
+	if id == 0 {
+
+		// Read all values from channel, then broadcast
+		for i := 0; i < g-1; i++ {
+			<-channel
+		}
+		c.Broadcast()
+
+	} else {
+
+		// Write to channel and wait
+		c.L.Lock()
+		channel <- id
+		c.Wait()
+		c.L.Unlock()
+	}
 }
 
 
