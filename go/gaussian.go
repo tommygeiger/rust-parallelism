@@ -74,7 +74,7 @@ func main() {
 		}
 
 		// Verify solution
-		fmt.Printf("%v,%v,%v\n",m,g,elapsed)
+		fmt.Printf("%v,%v,%d\n",m,g,elapsed)
 		for i, xi := range x {
 				if math.Abs(matrix.x[i] - xi) > ε {
 						fmt.Println("Calculated:", x)
@@ -96,7 +96,10 @@ func doEliminate(id int) {
 				doPivot(k)
 			}
 
+			// start := time.Now()
 			Barrier(id)
+			// end := time.Now()
+			// fmt.Println("Waited at barrier #1 for",end.Sub(start))
 
 			// Elimination step
 			for i := k + 1 + id; i < m; i += g {
@@ -106,7 +109,10 @@ func doEliminate(id int) {
 				aug[i][k] = 0
 			}
 
+			// start = time.Now()
 			Barrier(id)
+			// end = time.Now()
+			// fmt.Println("Waited at barrier #2 for",end.Sub(start))
 		}
 }
 
@@ -145,7 +151,7 @@ func doPivot(k int) {
 }
 
 
-// Sync all goroutines
+// Barrier implementation, syncs all goroutines
 func Barrier(id int) {
 
 	// Master thread waits for all channels, then broadcasts
