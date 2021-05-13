@@ -52,17 +52,21 @@ func main() {
 		}
 
 		// Init buffered channel
-		channel = make(chan int, g)
+		channel = make(chan int, g-1)
+
 
 		/*----*/ start := time.Now() /*----*/
+
 		// Spawn goroutines for elimination step
 		for id := 0; id < g; id++ {
 			wg.Add(1)
 			go doEliminate(id)
 		}
 		wg.Wait()
+
 		/*----*/ end := time.Now() /*----*/
 		elapsed := end.Sub(start)
+
 
 		// Back substitution
 		for i := m - 1; i >= 0; i-- {
@@ -74,7 +78,7 @@ func main() {
 		}
 
 		// Verify solution
-		fmt.Printf("%v,%v,%d\n",m,g,elapsed)
+		fmt.Printf("%v,%v,%v\n",m,g,elapsed)
 		for i, xi := range x {
 				if math.Abs(matrix.x[i] - xi) > ε {
 						fmt.Println("Calculated:", x)
@@ -96,10 +100,7 @@ func doEliminate(id int) {
 				doPivot(k)
 			}
 
-			// start := time.Now()
 			Barrier(id)
-			// end := time.Now()
-			// fmt.Println("Waited at barrier #1 for",end.Sub(start))
 
 			// Elimination step
 			for i := k + 1 + id; i < m; i += g {
@@ -109,10 +110,7 @@ func doEliminate(id int) {
 				aug[i][k] = 0
 			}
 
-			// start = time.Now()
 			Barrier(id)
-			// end = time.Now()
-			// fmt.Println("Waited at barrier #2 for",end.Sub(start))
 		}
 }
 
@@ -170,6 +168,7 @@ func Barrier(id int) {
 		channel <- id
 		c.Wait()
 		c.L.Unlock()
+
 	}
 }
 
